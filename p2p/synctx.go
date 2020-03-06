@@ -256,6 +256,9 @@ func (tm *syncTxManager) handleTxReq(remotePeer p2pcommon.RemotePeer, mID p2pcom
 	for _, f := range futures {
 		if tmp, err := tm.msgHelper.ExtractTxsFromResponseAndError(f, nil); err == nil {
 			for _, tx := range tmp {
+				if tx == nil {
+					continue
+				}
 				txs[types.ToTxID(tx.Hash)] = tx
 			}
 		} else {
