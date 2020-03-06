@@ -32,9 +32,10 @@ type syncTxManager struct {
 
 	txCache       *lru.Cache
 	// received notice but not in my mempool
-	frontCache    map[types.TxID]*incomingTxNotice
-	taskChannel   chan smTask
-	finishChannel chan struct{}
+	frontCache       map[types.TxID]*incomingTxNotice
+	taskChannel      chan smTask
+	taskQueryChannel chan smTask
+	finishChannel    chan struct{}
 
 	getTicker   *time.Ticker
 }
@@ -43,9 +44,10 @@ type smTask func()
 
 func newTxSyncManager(sm p2pcommon.SyncManager, actor p2pcommon.ActorService, pm p2pcommon.PeerManager, logger *log.Logger) *syncTxManager {
 	tm := &syncTxManager{sm:sm, actor: actor, pm: pm, logger: logger,
-		frontCache:    make(map[types.TxID]*incomingTxNotice),
-		taskChannel:   make(chan smTask, 20),
-		finishChannel: make(chan struct{}, 1),
+		frontCache:       make(map[types.TxID]*incomingTxNotice),
+		taskChannel:      make(chan smTask, 20),
+		finishChannel:    make(chan struct{}, 1),
+		taskQueryChannel: make(chan smTask, 10),
 
 		msgHelper:   message.GetHelper(),
 		getTicker:   time.NewTicker(minimumTxQueryInterval),
@@ -60,6 +62,7 @@ func newTxSyncManager(sm p2pcommon.SyncManager, actor p2pcommon.ActorService, pm
 
 func (tm *syncTxManager) Start() {
 	go tm.runManager()
+	go tm.runQueryLog()
 }
 
 func (tm *syncTxManager) runManager() {
@@ -84,6 +87,23 @@ MANLOOP:
 		}
 	}
 	tm.logger.Debug().Msg("syncTXManager finished")
+}
+func (tm *syncTxManager) runQueryLog() {
+	defer func() {
+		if panicMsg := recover(); panicMsg != nil {
+			tm.logger.Warn().Str("callStack", string(debug.Stack())).Str("errMsg",fmt.Sprintf("%v",panicMsg)).Msg("panic occurred handle get tx queries")
+		}
+	}()
+	// set interval of trying to resend getTransaction
+MANLOOP:
+	for {
+		select {
+		case task := <-tm.taskQueryChannel:
+			task()
+		case <-tm.finishChannel:
+			break MANLOOP
+		}
+	}
 }
 
 func (tm *syncTxManager) Stop() {
@@ -159,7 +179,7 @@ func (tm *syncTxManager) sendGetTxs(peer p2pcommon.RemotePeer, ids []types.TxID)
 
 func (tm *syncTxManager) HandleGetTxReq(peer p2pcommon.RemotePeer, msgID p2pcommon.MsgID, data *types.GetTransactionsRequest) error {
 	select {
-	case tm.taskChannel <- func() {
+	case tm.taskQueryChannel <- func() {
 		reqHashes := data.Hashes
 		tm.handleTxReq(peer, msgID, reqHashes)
 	}:
