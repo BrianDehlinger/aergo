@@ -12,6 +12,7 @@ import (
 	"github.com/golang/protobuf/proto"
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/rs/zerolog"
+	"runtime/debug"
 	"sort"
 	"time"
 )
@@ -64,7 +65,7 @@ func (tm *syncTxManager) Start() {
 func (tm *syncTxManager) runManager() {
 	defer func() {
 		if panicMsg := recover(); panicMsg != nil {
-			tm.logger.Warn().Msgf("panic ocurred tx sync task- %v", panicMsg)
+			tm.logger.Warn().Str("callStack", string(debug.Stack())).Str("errMsg",fmt.Sprintf("%v",panicMsg)).Msg("panic ocurred tx sync task")
 		}
 	}()
 	tm.logger.Debug().Msg("syncTXManager started")
